@@ -32,14 +32,13 @@ import ctypes
 import datetime
 import json
 import re
-import subprocess
 import sys
 from getpass import getpass
 import secrets
 import string
 from ykman.device import list_all_devices
 from ykman import scripting as s
-
+import struct
 
 import requests
 import urllib3
@@ -361,21 +360,19 @@ def generate_and_set_pin():
     print("in generate_and_set_pin\n")
     global pin
     if configs["useRandomPIN"]:
-        # devices = list(CtapHidDevice.list_devices())
-        device = s.single()
-        with device.fido() as connection:
-            ctap = Ctap2(connection)
-            if ctap.info.options.get("clientPin"):
-                print("\tPIN already set for the device. Quitting.")
-                print(
-                    "\tReset YubiKey and rerun the script if you want to use the config 'useRandomPIN'"
-                )
-                quit()
-            pin = generate_pin()
-            print(f"\tWe will now set the PIN to: {pin} \n")
-            client_pin = ClientPin(ctap)
-            client_pin.set_pin(pin)
-            print(f"\tPIN set to {pin}")
+        device = get_device()
+        ctap = Ctap2(device)
+        if ctap.info.options.get("clientPin"):
+            print("\tPIN already set for the device. Quitting.")
+            print(
+                "\tReset YubiKey and rerun the script if you want to use the config 'useRandomPIN'"
+            )
+            quit()
+        pin = generate_pin()
+        print(f"\tWe will now set the PIN to: {pin} \n")
+        client_pin = ClientPin(ctap)
+        client_pin.set_pin(pin)
+        print(f"\tPIN set to {pin}")
     else:
         print("\tNot generating PIN. Allowing platform to prompt for PIN\n")
 
@@ -387,34 +384,66 @@ def set_ctap21_flags():
         WindowsClient.is_available()
         and not ctypes.windll.shell32.IsUserAnAdmin()
     ):
-        device = s.single()
+        device = get_device()
         if not configs['useRandomPIN']:
             #Need to prompt for PIN again if using user supplied PIN
             print("PIN required to set minimum length and force pin change flags")
             pin = getpass("Please enter the PIN:")
 
-        with device.fido() as connection:
-            ctap = Ctap2(connection)
-            if ctap.info.options.get("setMinPINLength"):
-                client_pin = ClientPin(ctap)
-                token = client_pin.get_pin_token(
-                    pin, ClientPin.PERMISSION.AUTHENTICATOR_CFG
-                )
-                config = Config(ctap, client_pin.protocol, token)
-                print("\tGoing to set the minimum pin length to 6.")
-                config.set_min_pin_length(min_pin_length=6)
-                print("\tGoing to force a PIN change on first use.")
-                config.set_min_pin_length(force_change_pin=True)
+        ctap = Ctap2(device)
+        if ctap.info.options.get("setMinPINLength"):
+            client_pin = ClientPin(ctap)
+            token = client_pin.get_pin_token(
+                pin, ClientPin.PERMISSION.AUTHENTICATOR_CFG
+            )
+            config = Config(ctap, client_pin.protocol, token)
+            print("\tGoing to set the minimum pin length to 6.")
+            config.set_min_pin_length(min_pin_length=6)
+            print("\tGoing to force a PIN change on first use.")
+            config.set_min_pin_length(force_change_pin=True)
     else:
         print(
             "Using these CTAP21 features are not supported when running in this mode"
         )
 
+def get_device():
+    devices = list(enumerate_devices())
+    if(len(devices) == 0):
+        raise Exception("No Security Key found")
+    return devices[0]
 
 def get_serial_number():
     for device, info in list_all_devices():
         print(f"\tFound YubiKey with serial number: {info.serial}")
         return info.serial
+    return get_thales_serial_number()
+
+
+def get_thales_serial_number() -> string:
+    
+    # Get first device
+    device = list(enumerate_devices())[0]
+   
+    # Send request
+    packet = struct.pack(">IBBBB", device._channel_id, 128 | 0x50, 0x00, 0x01, 0x55)
+    device._connection.write_packet(packet.ljust(device._packet_size, b"\0"))
+        
+    # Read response
+    recv = device._connection.read_packet()
+
+    r_channel = struct.unpack_from(">I", recv)[0]
+    if r_channel != device._channel_id:
+        raise Exception("Wrong channel")
+    
+    if (recv[7] != 0) or (recv[7] != 0): 
+        raise Exception("Unable to get Thales Serial Number")    
+    
+    if sys.getsizeof(recv) < 17:
+        raise Exception("Unable to get Thales Serial Number")
+    
+    serial = recv[9:17].decode("utf-8")
+    print(f"\tFound Thales Security Key with serial number: {serial}")
+    return serial
 
 
 def warn_user_about_pin_behaviors():
