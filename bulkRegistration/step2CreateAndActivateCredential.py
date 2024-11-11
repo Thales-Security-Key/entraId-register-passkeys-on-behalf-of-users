@@ -37,8 +37,8 @@ from getpass import getpass
 import secrets
 import string
 from ykman.device import list_all_devices
-from ykman import scripting as s
 import struct
+from time import sleep
 
 import requests
 import urllib3
@@ -47,8 +47,8 @@ from fido2.ctap2.extensions import CredProtectExtension
 from fido2.hid import CtapHidDevice
 from fido2.utils import websafe_decode, websafe_encode
 from fido2.ctap2 import Ctap2, Config
-from fido2.ctap import CtapError
 from fido2.ctap2.pin import ClientPin
+from fido2.pcsc import SW_SUCCESS
 
 # Disabling warnings that get produced when certificate stores aren't updated
 # to check certificate validity.
@@ -84,6 +84,19 @@ def enumerate_devices():
         for dev in CtapPcscDevice.list_devices():
             yield dev
 
+def wait_device():
+    print("\n-----")
+    print(">>> Waiting for Security Key to be plugged in...")
+    return wait_device_loop()
+
+def wait_device_loop():
+    devices = list(enumerate_devices())
+    if( len(devices) == 0):
+        sleep(0.2)
+        return wait_device_loop()
+    if( len(devices) > 1):
+        raise("\nMore than one device found.\n")
+    return devices[0]
 
 # Handle user interaction
 class CliInteraction(UserInteraction):    
@@ -117,7 +130,8 @@ def create_credentials_on_security_key(
         "\tPrepare for FIDO2 Registration Ceremony and follow the prompts\n"
     )    
     print("\tPress Enter when security key is ready\n")
-    serial_number = get_serial_number()
+    device = wait_device()
+    serial_number = get_serial_number(device)
 
     if (
         WindowsClient.is_available()
@@ -130,24 +144,20 @@ def create_credentials_on_security_key(
         global pin
         pin = "n/a"
     else:
-        generate_and_set_pin()
-        # Locate a device
-        for dev in enumerate_devices():
-            # Since the origin is common across all Entra ID tenants
-            # we will simply hard-code it here.            
-            client = Fido2Client(
-                dev,
+        generate_and_set_pin(device)
+
+        client = Fido2Client(
+                device,
                 "https://" + rp_id,
                 user_interaction=CliInteraction(),
             )            
-            if client.info.options.get("rk"):
-                break
-        else:
+        if (client.info.options.get("rk") == False):
             print(
                 "No security key with support for discoverable"
                 " credentials found"
             )
             sys.exit(1)
+
 
     pkcco = build_creation_options(
         challenge, user_id, user_display_name, user_name, rp_id
@@ -162,7 +172,6 @@ def create_credentials_on_security_key(
     print(f"Attestation: {attestation}")
 
     client_data = result["clientData"].b64
-    # print(f"\nclientData: {client_data}")
 
     credential_id = websafe_encode(
         result.attestation_object.auth_data.credential_data.credential_id
@@ -175,6 +184,10 @@ def create_credentials_on_security_key(
         )
     )
     print(f"\nclientExtensions: {websafe_decode(client_extenstion_results)}")
+
+    # Set min pin length and force pin change flags
+    if configs["useCTAP21Features"]:
+        set_ctap21_flags(device)
 
     return (
         attestation,
@@ -355,12 +368,11 @@ def generate_pin():
             return digits
 
 
-def generate_and_set_pin():
+def generate_and_set_pin(device):
     print("-----")
     print("in generate_and_set_pin\n")
     global pin
     if configs["useRandomPIN"]:
-        device = get_device()
         ctap = Ctap2(device)
         if ctap.info.options.get("clientPin"):
             print("\tPIN already set for the device. Quitting.")
@@ -377,14 +389,14 @@ def generate_and_set_pin():
         print("\tNot generating PIN. Allowing platform to prompt for PIN\n")
 
 
-def set_ctap21_flags():
+def set_ctap21_flags(device):
     global pin    
     #No need to try if using the Windows client (as non-admin)
     if not (
         WindowsClient.is_available()
         and not ctypes.windll.shell32.IsUserAnAdmin()
     ):
-        device = get_device()
+        
         if not configs['useRandomPIN']:
             #Need to prompt for PIN again if using user supplied PIN
             print("PIN required to set minimum length and force pin change flags")
@@ -406,42 +418,55 @@ def set_ctap21_flags():
             "Using these CTAP21 features are not supported when running in this mode"
         )
 
-def get_device():
-    devices = list(enumerate_devices())
-    if(len(devices) == 0):
-        raise Exception("No Security Key found")
-    return devices[0]
 
-def get_serial_number():
+def get_serial_number(device):
+    # Get serial number for YubiKey
     for device, info in list_all_devices():
         print(f"\tFound YubiKey with serial number: {info.serial}")
         return info.serial
-    return get_thales_serial_number()
+    # Get serial number for Thales Security Key
+    return get_thales_serial_number(device)
 
 
-def get_thales_serial_number() -> string:
-    
-    # Get first device
-    device = list(enumerate_devices())[0]
-   
-    # Send request
-    packet = struct.pack(">IBBBB", device._channel_id, 128 | 0x50, 0x00, 0x01, 0x55)
-    device._connection.write_packet(packet.ljust(device._packet_size, b"\0"))
+def get_thales_serial_number(device) -> string:
         
-    # Read response
-    recv = device._connection.read_packet()
+    if isinstance(device, CtapHidDevice):
+        # Get Thales Serial Number in USB mode
+        packet = struct.pack(">IBBBB", device._channel_id, 128 | 0x50, 0x00, 0x01, 0x55)
+        device._connection.write_packet(packet.ljust(device._packet_size, b"\0"))        
+        recv = device._connection.read_packet()
 
-    r_channel = struct.unpack_from(">I", recv)[0]
-    if r_channel != device._channel_id:
-        raise Exception("Wrong channel")
+        r_channel = struct.unpack_from(">I", recv)[0]
+        if r_channel != device._channel_id:
+            raise Exception("Wrong channel")
+        
+        if (recv[7] != 0) or (recv[8] != 0x02): 
+            raise Exception("Unable to get Thales Serial Number")    
+        
+        if sys.getsizeof(recv) < 17:
+            raise Exception("Unable to get Thales Serial Number")
+        
+        serial = recv[9:17].decode("utf-8")
     
-    if (recv[7] != 0) or (recv[7] != 0): 
-        raise Exception("Unable to get Thales Serial Number")    
-    
-    if sys.getsizeof(recv) < 17:
-        raise Exception("Unable to get Thales Serial Number")
-    
-    serial = recv[9:17].decode("utf-8")
+    else:
+        # Get Thales Serial Number in NFC mode
+        try:
+            AID_CM = b"\xa0\x00\x00\x00\x03\x00\x00\x00"
+            apdu = b"\x00\xa4\x04\x00" + struct.pack("!B", len(AID_CM)) + AID_CM
+            resp, sw1, sw2 = device.apdu_exchange(apdu)
+            if (sw1, sw2) != SW_SUCCESS:
+                raise ValueError("Card Manager applet selection failure.")
+
+            resp, sw1, sw2 = device.apdu_exchange(b"\x80\xCA\x01\x04")
+            if (sw1, sw2) != SW_SUCCESS:
+                raise ValueError("Unable to get Thales serial number.")
+            serial = resp[3:].decode("utf-8")
+        except:
+            print(f"\tUnable to get serial number for this device.")
+            return "" 
+        finally:
+            device._select()
+
     print(f"\tFound Thales Security Key with serial number: {serial}")
     return serial
 
@@ -542,13 +567,11 @@ def main():
                         access_token,
                     )
 
-                    # Set min pin length and force pin change flags
-                    if configs["useCTAP21Features"]:
-                        set_ctap21_flags()
                     print(
                         "\n\tCompleted registration and configuration "
                         + f"for user: {user_name}"
                     )
+
                     # Write CSV with security key registration details
                     # username,authMethodID,serialNumber,PIN
                     csv_writer.writerow([user_name, auth_method, serial, pin])

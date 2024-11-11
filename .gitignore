@@ -162,3 +162,4 @@ bulkRegistration/configs.json
 usersToRegister.csv
 keysRegistered.csv
 configs.json
+.vscode/launch.json
