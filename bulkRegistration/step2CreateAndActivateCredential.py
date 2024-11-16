@@ -95,7 +95,7 @@ def wait_device_loop():
         sleep(0.2)
         return wait_device_loop()
     if( len(devices) > 1):
-        raise("\nMore than one device found.\n")
+        raise Exception("More than one device found.")
     return devices[0]
 
 # Handle user interaction
@@ -455,11 +455,11 @@ def get_thales_serial_number(device) -> string:
             apdu = b"\x00\xa4\x04\x00" + struct.pack("!B", len(AID_CM)) + AID_CM
             resp, sw1, sw2 = device.apdu_exchange(apdu)
             if (sw1, sw2) != SW_SUCCESS:
-                raise ValueError("Card Manager applet selection failure.")
+                raise Exception("Card Manager applet selection failure.")
 
             resp, sw1, sw2 = device.apdu_exchange(b"\x80\xCA\x01\x04")
             if (sw1, sw2) != SW_SUCCESS:
-                raise ValueError("Unable to get Thales serial number.")
+                raise Exception("Unable to get Thales serial number.")
             serial = resp[3:].decode("utf-8")
         except:
             print(f"\tUnable to get serial number for this device.")
@@ -548,24 +548,29 @@ def main():
                     print(f"\tchallengeExpiryTime: {challenge_expiry_time}")
                     print(f"\trpID: {rp_id}")
                     print("\n")
-                    (
-                        att,
-                        clientData,
-                        credId,
-                        extn,
-                        serial,
-                    ) = create_credentials_on_security_key(
-                        user_id, challenge, user_display_name, user_name,rp_id
-                    )
-                    activated, auth_method = create_and_activate_fido_method(
-                        credId,
-                        extn,
-                        user_name,
-                        att,
-                        clientData,
-                        serial,
-                        access_token,
-                    )
+                    try:
+                        (
+                            att,
+                            clientData,
+                            credId,
+                            extn,
+                            serial,
+                        ) = create_credentials_on_security_key(
+                            user_id, challenge, user_display_name, user_name,rp_id
+                        )
+                        activated, auth_method = create_and_activate_fido_method(
+                            credId,
+                            extn,
+                            user_name,
+                            att,
+                            clientData,
+                            serial,
+                            access_token,
+                        )
+                    except Exception as error:
+                        print("\n\tERROR >> " + str(error))
+                        print("\tERROR >> Exiting\n")
+                        return
 
                     print(
                         "\n\tCompleted registration and configuration "
