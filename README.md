@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> This project is a fork of a Yubico repository, with the aim of adding support for the Thales Security Key.
+
 # entra-Id-register-passkeys-on-behalf-of-users
 
 - This project will use Microsoft Graph APIs to provision FIDO2 credentials on a FIDO2 security key.
