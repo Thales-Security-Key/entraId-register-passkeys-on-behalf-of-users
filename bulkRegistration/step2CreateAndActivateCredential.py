@@ -104,7 +104,7 @@ class CliInteraction(UserInteraction):
         print("\nTouch your security key now...\n")
 
     def request_pin(self, permissions, rp_id):
-        if not configs["useRandomPIN"]:
+        if not configs["setRandomPIN"]:
             return getpass("Enter PIN: ")            
         else:
             return pin
@@ -140,7 +140,7 @@ def create_credentials_on_security_key(
         # Use the Windows WebAuthn API if available, and we're not running        
         client = WindowsClient("https://" + rp_id)
 
-        # Config file setting for useRandomPIN doesn't apply in this scenario
+        # Config file setting for setRandomPIN doesn't apply in this scenario
         global pin
         pin = "n/a"
     else:
@@ -186,7 +186,7 @@ def create_credentials_on_security_key(
     print(f"\nclientExtensions: {websafe_decode(client_extenstion_results)}")
 
     # Set min pin length and force pin change flags
-    if configs["useCTAP21Features"]:
+    if configs["setMinimumPINLength"] or configs["setForceChangePin"]:
         set_ctap21_flags(device)
 
     return (
@@ -350,6 +350,12 @@ def create_and_activate_fido_method(
 
 def generate_pin():
     disallowed_pins = [
+        "12345678",
+        "12341234",
+        "87654321",
+        "12344321",
+        "11223344",
+        "12121212",
         "123456",
         "123123",
         "654321",
@@ -361,8 +367,11 @@ def generate_pin():
         "159753",
     ]
 
+    # Get length
+    length = configs["randomPINLength"]
+
     while True:
-        digits = "".join(secrets.choice(string.digits) for _ in range(6))
+        digits = "".join(secrets.choice(string.digits) for _ in range(length))
         # Check if PIN is not trivial and not in banned list
         if len(set(digits)) != 1 and digits not in disallowed_pins:
             return digits
@@ -372,12 +381,12 @@ def generate_and_set_pin(device):
     print("-----")
     print("in generate_and_set_pin\n")
     global pin
-    if configs["useRandomPIN"]:
+    if configs["setRandomPIN"]:
         ctap = Ctap2(device)
         if ctap.info.options.get("clientPin"):
             print("\tPIN already set for the device. Quitting.")
             print(
-                "\tReset YubiKey and rerun the script if you want to use the config 'useRandomPIN'"
+                "\tReset YubiKey and rerun the script if you want to use the config 'setRandomPIN'"
             )
             quit()
         pin = generate_pin()
@@ -397,22 +406,30 @@ def set_ctap21_flags(device):
         and not ctypes.windll.shell32.IsUserAnAdmin()
     ):
         
-        if not configs['useRandomPIN']:
+        if not configs['setRandomPIN']:
             #Need to prompt for PIN again if using user supplied PIN
             print("PIN required to set minimum length and force pin change flags")
             pin = getpass("Please enter the PIN:")
 
         ctap = Ctap2(device)
+
         if ctap.info.options.get("setMinPINLength"):
             client_pin = ClientPin(ctap)
             token = client_pin.get_pin_token(
                 pin, ClientPin.PERMISSION.AUTHENTICATOR_CFG
             )
             config = Config(ctap, client_pin.protocol, token)
-            print("\tGoing to set the minimum pin length to 6.")
-            config.set_min_pin_length(min_pin_length=6)
-            print("\tGoing to force a PIN change on first use.")
-            config.set_min_pin_length(force_change_pin=True)
+
+            # Set PIN length
+            if configs["setMinimumPINLength"]:
+                length = configs["minimumPINLength"]
+                print("\tGoing to set the minimum pin length to " + str(length) + ".")
+                config.set_min_pin_length(min_pin_length=length)
+            
+            # Set Force Change PIN
+            if configs["setForceChangePin"]:
+                print("\tGoing to force a PIN change on first use.")
+                config.set_min_pin_length(force_change_pin=True)
     else:
         print(
             "Using these CTAP21 features are not supported when running in this mode"
@@ -477,14 +494,14 @@ def warn_user_about_pin_behaviors():
     if WindowsClient.is_available():
         # Running on Windows as admin
         if ctypes.windll.shell32.IsUserAnAdmin():
-            if not configs["useRandomPIN"]:
+            if not configs["setRandomPIN"]:
                 print(
                     "\n\n\tIf PIN is not already set on security key(s), "
                     "then make sure PIN is set on security keys before "
                     "proceeding"
                 )
                 input("\n\tPress Enter key to continue...")
-            if configs["useRandomPIN"]:
+            if configs["setRandomPIN"]:
                 print(
                     "\n\n\tIf PIN is already set on security key(s) then "
                     "script will prompt for existing PIN and change to new "
@@ -492,23 +509,23 @@ def warn_user_about_pin_behaviors():
                 )
                 input("\n\tPress Enter key to continue...")
         if not ctypes.windll.shell32.IsUserAnAdmin():
-            if configs["useRandomPIN"]:
+            if configs["setRandomPIN"]:
                 print(
-                    "\n\n\tuseRandomPIN setting is set to true. This "
+                    "\n\n\tsetRandomPIN setting is set to true. This "
                     "setting will be ignored. User will be prompted to "
                     "set PIN if it is not already set."
                 )
                 input("\n\tPress Enter key to continue...")
     # macOS and other platforms configurations to look out for:
     if not WindowsClient.is_available():
-        if not configs["useRandomPIN"]:
+        if not configs["setRandomPIN"]:
             print(
                 "\n\n\tIf PIN is not already set on security key(s), "
                 "then make sure PIN is set on security keys before "
                 "proceeding"
             )
             input("\n\tPress Enter key to continue...")
-        if configs["useRandomPIN"]:
+        if configs["setRandomPIN"]:
             print(
                 "\n\n\tIf PIN is already set on security key(s) then "
                 "script will prompt for existing PIN and change to new "

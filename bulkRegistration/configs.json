@@ -1,10 +1,13 @@
 {
-    "tenantName": "{tenantName}.onmicrosoft.com",
-    "client_id": "",
-    "client_secret": "",
-    "usersInScopeGroup": "GroupName",
-    "challengeTimeoutInMinutes": 60,
-    "deleteExistingUserFIDOCredentials": false,        
-    "useRandomPIN": false,
-    "useCTAP21Features": false
+  "tenantName": "{tenantName}.onmicrosoft.com",
+  "client_id": "",
+  "client_secret": "",
+  "usersInScopeGroup": "GroupName",
+  "challengeTimeoutInMinutes": 60,
+  "deleteExistingUserFIDOCredentials": false,
+  "setRandomPIN": true,
+  "randomPINLength": 8,
+  "setMinimumPINLength": true,
+  "minimumPINLength": 8,
+  "setForceChangePin": true
 }

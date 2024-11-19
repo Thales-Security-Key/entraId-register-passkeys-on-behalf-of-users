@@ -55,13 +55,15 @@ The second script `step2CreateAndActivateCredential.py` will be used to:
    | Config | Description |
    |-----------|-------------|
    |tenantName | Required. Set with the Entra ID tenant name|
-   |client_id | Required. Set with the registered application appId/clientID in Entra ID.|
+   |client*id | Required. Set with the registered application appId/clientID in Entra ID.|
    |client_secret| Required. Set with the client secret for the registered application in Entra ID.|
    |usersInScopeGroup| Required. An Entra ID Security group name that has all the users that are in scope for FIDO2 security key registration.|
    |challengeTimeoutInMinutes| Required. The number of minutes the Entra ID issued FIDO2 challenge should be valid for. Used to allow for extended processing times between the point where the challenge is requested and the registeration of the credential with EntraID|
    |deleteExistingUserFIDOCredentials| Required. A boolean indicating whether existing FIDO2 keys registered for the user in Entra ID should be deleted before registering new FIDO2 credentials.|
-   |useRandomPIN| Required. Set to _false_ if using a security key with existing PIN and you prefer to let the platform prompt you for PIN. When using false some platforms will require a PIN to be set first. Script will set random 6 digit PIN if set to `true`. Warning if setting a random PIN make sure not to lose track of the random PIN or the security key may need to be reset. |  
-   |useCTAP21Features| Required. This feature is intended to best work with YubiKey firmware 5.7+. See https://www.yubico.com/blog/now-available-for-purchase-yubikey-5-series-and-security-key-series-with-new-5-7-firmware/. If this configuration is set to `true`, the script will attempt to set the minimum PIN length to 6 and force a PIN change on first use. _IMPORTANT_ If you are using a key with a shorter 4 digit PIN, this configuration will force the YubiKey to use a 6 digit PIN going forward. Once the minimum PIN length setting on the YubiKey is increased it cannot be decreased again without resetting the FIDO2 application and erasing all existing FIDO2 credentials on the YubiKey. These features can only be set when the script is run on Windows 11 as admin or with macOS. Authenticating when security keys have these CTAP2.1 features enabled is best experienced on Windows 11 or macOS(Chrome only).|
+   |setRandomPIN| Required. Set to \_false* if using a security key with existing PIN and you prefer to let the platform prompt you for PIN. When using false some platforms will require a PIN to be set first. Script will set random 6 digit PIN if set to `true`. Warning if setting a random PIN make sure not to lose track of the random PIN or the security key may need to be reset. |  
+   |setMinimumPINLength| Required. If this configuration is set to `true`, the script will attempt to set the minimum PIN length to the value defined in "minimumPINLength" . _IMPORTANT_ If you are using a key with a shorter 4 digit PIN, this configuration will force the key to use a 6 digit PIN going forward. Once the minimum PIN length setting on the YubiKey is increased it cannot be decreased again without resetting the FIDO2 application and erasing all existing FIDO2 credentials on the YubiKey. These features can only be set when the script is run on Windows 11 as admin or with macOS. Authenticating when security keys have these CTAP2.1 features enabled is best experienced on Windows 11 or macOS(Chrome only).|
+   |setForceChangePin| Required. If this configuration is set to `true`, the script will attempt to set force a PIN change on first use
+
 3. `pip install fido2`
 4. `pip install requests`
 5. `pip install yubikey-manager`
@@ -69,37 +71,17 @@ The second script `step2CreateAndActivateCredential.py` will be used to:
 ### Other setup considerations
 
 1. While not explicitly required, it is suggested that you use a security key that you can reset without risk of locking out of any accounts where you have registered the security key.
-2. Depending on the `useRandomPIN` value in `configs.json` the script may set a random PIN. If that random PIN is then lost, the security key may need to be reset.
+2. Depending on the `setRandomPIN` value in `configs.json` the script may set a random PIN. If that random PIN is then lost, the security key may need to be reset.
 3. Read the below _Tested Configurations_ section to understand how different platforms, key configurations, and `configs.json` configurations may behave.
-4. The scripts have mostly been tested with YubiKeys, but other vendors' security keys have also been tested. Other vendors products may not fully work with all features of the script since there are some dependencies on Yubikey Manager software when attempting to set YubiKey PINs and determining YubiKey serial numbers so those features will not work if using security keys from other vendors. The script will work with other security key vendors' products if using `"useRandomPIN": false` and if the security key already has a PIN set.
+4. The scripts have mostly been tested with YubiKeys, but other vendors' security keys have also been tested. Other vendors products may not fully work with all features of the script since there are some dependencies on Yubikey Manager software when attempting to set YubiKey PINs and determining YubiKey serial numbers so those features will not work if using security keys from other vendors. The script will work with other security key vendors' products if using `"setRandomPIN": false` and if the security key already has a PIN set.
 5. Any security key that is used with this script must also be supported by Microsoft. See https://learn.microsoft.com/en-us/entra/identity/authentication/concept-authentication-passwordless#fido2-security-key-providers
-
-#### Tested configurations:
-
-| Platform           | PIN already configured on key | configs.json setting   | Result                                                                                |
-| ------------------ | ----------------------------- | ---------------------- | ------------------------------------------------------------------------------------- |
-| Windows admin-mode | PIN not set                   | useRandomPIN=false     | Not supported configuration                                                           |
-| Windows admin-mode | PIN not set                   | useRandomPIN=true      | Script will set a random PIN                                                          |
-| Windows admin-mode | PIN set                       | useRandomPIN=false     | Script will prompt for existing PIN                                                   |
-| Windows admin-mode | PIN set                       | useRandomPIN=true      | Script will prompt for current PIN and change to new random PIN                       |
-| Windows admin-mode | n/a                           | useCTAP21Features=true | Script will prompt for PIN and force PIN change and also set the minimum PIN length   |
-| Windows non-admin  | PIN not set                   | useRandomPIN=false     | Windows Security message will prompt user to set PIN                                  |
-| Windows non-admin  | PIN not set                   | useRandomPIN=true      | useRandomPIN ignored. Windows Security message will prompt user to set PIN            |
-| Windows non-admin  | PIN set                       | useRandomPIN=false     | Windows Security message will prompt for existing PIN                                 |
-| Windows non-admin  | PIN set                       | useRandomPIN=true      | useRandomPIN ignored. Windows Security message will prompt for existing PIN           |
-| Windows non-admin  | n/a                           | useCTAP21Features=true | Not supported configuration. Script will skip attempting to set the CTAP 2.1 features |
-| macOS              | PIN not set                   | useRandomPIN=false     | Not supported configuration                                                           |
-| macOS              | PIN not set                   | useRandomPIN=true      | Script will set a random PIN                                                          |
-| macOS              | PIN set                       | useRandomPIN=false     | Script will prompt for existing PIN                                                   |
-| macOS              | PIN set                       | useRandomPIN=true      | Script will prompt for current PIN and change to new random PIN                       |
-| macOS              | n/a                           | useCTAP21Features=true | Script will prompt for PIN and force PIN change and also set the minimum PIN length   |
 
 ## How to run
 
 1. Open terminal. Notes about running on Windows.
 
    1. When running the script without administrative privileges, the WinAPI is used (webauthn.dll). This has different behaviors and capabilities than when running the script in admin mode.
-      Besides the user interface differences, it should be noted that some extensions like credProtectionPolicies cannot be set using webauthn.dll. Entra ID specifically requests credProtect policy level 1 (aka optional) when creating FIDO2 credentials. This doesn't get explicitly set when using webauthn.dll. Note that the default behavior for the YubiKey is to use Level 1 if not explicitly set so effectively the results are similar. Also note that the configs.json `useRandomPIN` will be ignored if enabled and the user will be prompted to set a PIN during registration instead of using a randomly generated one.
+      Besides the user interface differences, it should be noted that some extensions like credProtectionPolicies cannot be set using webauthn.dll. Entra ID specifically requests credProtect policy level 1 (aka optional) when creating FIDO2 credentials. This doesn't get explicitly set when using webauthn.dll. Note that the default behavior for the YubiKey is to use Level 1 if not explicitly set so effectively the results are similar. Also note that the configs.json `setRandomPIN` will be ignored if enabled and the user will be prompted to set a PIN during registration instead of using a randomly generated one.
    2. When running the script with administrator privileges, a FIDOClient is instead used and supports additional capabilities.
 
 2. Call `python step1GetFIDO2Challenges.py`
